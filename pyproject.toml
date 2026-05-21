@@ -1,0 +1,39 @@
+[project]
+name = "route-generator"
+version = "0.1.0"
+description = "Automated routing QA — regression testing framework for Valhalla routing & guidance quality"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+route-generator = "route_generator.main:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.0.0",
+    "ruff>=0.15.13",
+]
+
+[tool.ruff]
+line-length = 105
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

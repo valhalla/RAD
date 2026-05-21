@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+ 
+# uv / venv
+.venv/
+.uv/
+ 
+# ruff
+.ruff_cache/
+ 
+# pre-commit
+.pre-commit-hooks/
+ 
+# OS
+.DS_Store
+ 

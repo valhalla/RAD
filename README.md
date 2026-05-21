@@ -35,3 +35,42 @@ flowchart TD
 	style WebApp fill:#ffffff,stroke:#333,stroke-width:1px
 
 ```
+## Route Generator
+
+### Getting started
+
+This project uses [`uv`](https://docs.astral.sh/uv/) as its package manager. Plain `pip` works too.
+
+**With uv (recommended)**
+```bash
+curl -Ls https://astral.sh/uv/install.sh | sh
+uv sync
+uv run route-generator
+```
+
+**With pip**
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+route-generator
+```
+
+### Development setup
+
+```bash
+uv sync
+uv run pre-commit install
+uv run ruff check --fix .
+uv run ruff format .
+```
+
+### Project structure
+
+```
+route_generator/
+    __init__.py
+    main.py       # entry point (placeholder)
+pyproject.toml
+.pre-commit-config.yaml
+```
