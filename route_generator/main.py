@@ -1,6 +1,6 @@
 """Route generator entry point.
 
-Generates a coverage-driven suite of Valhalla route requests
+Generates a suite of Valhalla route requests
 over a static OSM extract for regression QA.
 """
 
