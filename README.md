@@ -1,3 +1,8 @@
+# RAD — Real world, Analyze, Delta
+
+Automated routing QA framework for the [Valhalla](https://github.com/valhalla/valhalla) routing engine.
+
+
 ## Overall QA/QC Tool Architecture proposal
 ```mermaid
 flowchart TD
@@ -35,11 +40,16 @@ flowchart TD
 	style WebApp fill:#ffffff,stroke:#333,stroke-width:1px
 
 ```
+
 ## Route Generator
+
+Generates a JSONL file of randomized Valhalla `/route` requests — random coordinate pairs within Switzerland combined with hardcoded costing bundles. Output is ready to be sent to a Valhalla instance.
+
 
 ### Getting started
 
 This project uses [`uv`](https://docs.astral.sh/uv/) as its package manager. Plain `pip` works too.
+
 
 **With uv (recommended)**
 ```bash
@@ -56,6 +66,29 @@ pip install -e .
 route-generator
 ```
 
+### Usage
+
+```
+uv run route-generator [--output PATH] [--count N]
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--output` | `requests.jsonl` | Path to write the JSONL file |
+| `--count` | `1000` | Number of route requests |
+
+
+### Output format
+
+One JSON object per line (JSONL). Each line is a complete Valhalla `/route` request body:
+
+```json
+{"locations":[{"lon":8.123456,"lat":47.234567},{"lon":7.654321,"lat":46.789012}],"costing":"auto","costing_options":{}}
+```
+
+With default settings: **1000 requests**.
+
+
 ### Development setup
 
 ```bash
@@ -63,6 +96,7 @@ uv sync
 uv run pre-commit install
 uv run ruff check --fix .
 uv run ruff format .
+uv run pytest
 ```
 
 ### Project structure
@@ -70,7 +104,12 @@ uv run ruff format .
 ```
 route_generator/
     __init__.py
-    main.py       # entry point (placeholder)
+    main.py          # CLI entry point
+    generator.py     # core logic — polygon loading, sampling, request building
+data/
+    switzerland.geojson   # vendored Natural Earth country polygon
+tests/
+    test_generator.py
 pyproject.toml
 .pre-commit-config.yaml
 ```

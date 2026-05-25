@@ -7,7 +7,9 @@ license = "MIT"
 license-files = ["LICENSE"]
 
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "shapely>=2.0",
+]
 
 [project.scripts]
 route-generator = "route_generator.main:main"
@@ -16,9 +18,13 @@ route-generator = "route_generator.main:main"
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["route_generator*"]
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.0.0",
+    "pytest>=8.0",
     "ruff>=0.15.13",
 ]
 
