@@ -69,22 +69,13 @@ route-generator
 ### Usage
 
 ```
-uv run route-generator [--output PATH] [--count N] [--seed INT]
+uv run route-generator [--output PATH] [--count N]
 ```
 
 | Option | Default | Description |
 |---|---|---|
 | `--output` | `requests.jsonl` | Path to write the JSONL file |
-| `--count` | `1000` | Number of origin/destination pairs |
-| `--seed` | random | Integer seed for reproducible output |
-
-The seed is always printed — even when auto-generated — so you can reproduce any run:
-
-```
-Written 1000 requests to requests.jsonl (seed=3267999685)
-```
-
-To reproduce: `uv run route-generator --seed 3267999685`
+| `--count` | `1000` | Number of route requests |
 
 
 ### Output format
@@ -95,7 +86,7 @@ One JSON object per line (JSONL). Each line is a complete Valhalla `/route` requ
 {"locations":[{"lon":8.123456,"lat":47.234567},{"lon":7.654321,"lat":46.789012}],"costing":"auto","costing_options":{}}
 ```
 
-With default settings: 1000 pairs × 1 costing bundles = **1000 requests**.
+With default settings: **1000 requests**.
 
 
 ### Development setup

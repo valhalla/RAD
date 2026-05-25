@@ -1,7 +1,5 @@
 """Tests for route_generator.generator."""
 
-from __future__ import annotations
-
 import json
 import random
 
@@ -14,10 +12,6 @@ from route_generator.generator import (
     sample_point_in_polygon,
     write_jsonl,
 )
-
-# ---------------------------------------------------------------------------
-# Polygon loading
-# ---------------------------------------------------------------------------
 
 
 def test_load_switzerland_polygon_returns_valid_geometry():
@@ -52,11 +46,6 @@ def test_known_point_outside_switzerland():
     assert not paris.within(polygon)
 
 
-# ---------------------------------------------------------------------------
-# Coordinate sampling
-# ---------------------------------------------------------------------------
-
-
 def test_sample_point_in_polygon_is_within():
     polygon = load_switzerland_polygon()
     rng = random.Random(42)
@@ -79,11 +68,6 @@ def test_sample_point_reproducible_with_seed():
     rng1 = random.Random(99)
     rng2 = random.Random(99)
     assert sample_point_in_polygon(polygon, rng1) == sample_point_in_polygon(polygon, rng2)
-
-
-# ---------------------------------------------------------------------------
-# Request building
-# ---------------------------------------------------------------------------
 
 
 def test_build_requests_count():
@@ -131,11 +115,6 @@ def test_build_requests_reproducible_with_seed():
     reqs1 = list(build_requests(n_pairs=10, polygon=polygon, rng=random.Random(42)))
     reqs2 = list(build_requests(n_pairs=10, polygon=polygon, rng=random.Random(42)))
     assert reqs1 == reqs2
-
-
-# ---------------------------------------------------------------------------
-# JSONL output
-# ---------------------------------------------------------------------------
 
 
 def test_write_jsonl_line_count(tmp_path):
