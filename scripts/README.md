@@ -25,3 +25,8 @@ uv run python scripts/prepare_area.py \
 Place the relevant Geofabrik PBFs in `--cache-dir` before running. Run without `--cache-dir`
 to see which extracts intersect the buffered area (use this as a reference for which PBFs to download).
 
+**Notes**
+
+**Extract before merge.** Cutting each PBF to the buffered polygon first keeps the merge small and avoids osmium failing on overlapping border objects across files with different timestamps.
+
+

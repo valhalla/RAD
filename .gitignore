@@ -4,17 +4,21 @@ __pycache__/
 *.egg-info/
 dist/
 build/
- 
+
 # uv / venv
 .venv/
 .uv/
- 
+
 # ruff
 .ruff_cache/
- 
+
 # pre-commit
 .pre-commit-hooks/
- 
+
 # OS
 .DS_Store
- 
+
+*_buffered.geojson
+*_graph.osm.pbf
+valhalla.json
+valhalla_tiles/
