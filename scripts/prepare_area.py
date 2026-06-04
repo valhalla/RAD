@@ -14,16 +14,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-import requests
-from pyproj import Transformer
-from shapely.geometry import mapping, shape
-from shapely.ops import transform
+from shapely.geometry import mapping
+from shapely.geometry.base import BaseGeometry
 from shapely.wkt import loads as wkt_loads
 
-GEOFABRIK_INDEX_URL = "https://download.geofabrik.de/index-v1.json"
 
-
-def load_polygon_from_admins(admins_db: Path, area: str) -> object:
+def load_polygon_from_admins(admins_db: Path, area: str) -> BaseGeometry:
     """Load the exact country polygon from admins.sqlite at admin level 2.
 
     Closes the connection before handing off to Shapely to avoid a GEOS
@@ -48,21 +44,20 @@ def load_polygon_from_admins(admins_db: Path, area: str) -> object:
     return wkt_loads(row[0])
 
 
-def buffer_polygon(polygon: object, buffer_km: float) -> object:
-    """Buffer a WGS84 polygon by the given distance in kilometres.
+def buffer_polygon(polygon: BaseGeometry, buffer_km: float) -> BaseGeometry:
+    """Buffer a WGS84 polygon by an approximate degree equivalent of the given distance.
+
+    Uses a simple degree approximation (1° ≈ 111 km) rather than a metric projection.
+    Sufficient for the graph build buffer use case.
 
     :param polygon: Shapely geometry in WGS84 (EPSG:4326).
     :param buffer_km: Buffer distance in kilometres.
     :returns: Buffered Shapely geometry in WGS84.
     """
-    centroid = polygon.centroid
-    utm_crs = f"+proj=utm +zone={int((centroid.x + 180) / 6) + 1} +datum=WGS84"
-    to_utm = Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True).transform
-    to_wgs84 = Transformer.from_crs(utm_crs, "EPSG:4326", always_xy=True).transform
-    return transform(to_wgs84, transform(to_utm, polygon).buffer(buffer_km * 1000))
+    return polygon.buffer(buffer_km / 111.0)
 
 
-def save_geojson(polygon: object, path: Path) -> None:
+def save_geojson(polygon: BaseGeometry, path: Path) -> None:
     """Write a Shapely geometry to a GeoJSON FeatureCollection file.
 
     :param polygon: Shapely geometry to serialize.
@@ -75,58 +70,18 @@ def save_geojson(polygon: object, path: Path) -> None:
     path.write_text(json.dumps(geojson))
 
 
-def find_intersecting_urls(buffered_polygon: object) -> list[str]:
-    """Find Geofabrik PBF URLs whose geometries intersect the buffered polygon.
+def collect_pbfs(pbf_dir: Path) -> list[Path]:
+    """Collect all .osm.pbf files from a directory.
 
-    :param buffered_polygon: Shapely geometry of the buffered area in WGS84.
-    :returns: List of intersecting PBF download URLs.
-    :raises SystemExit: If the Geofabrik index cannot be fetched.
+    :param pbf_dir: Directory containing manually downloaded PBF files.
+    :returns: Sorted list of PBF paths found.
+    :raises SystemExit: If the directory is missing or empty.
     """
-    resp = requests.get(GEOFABRIK_INDEX_URL, timeout=30)
-    if not resp.ok:
-        sys.exit(f"Failed to fetch Geofabrik index: {resp.status_code}")
-    return [
-        f["properties"]["urls"]["pbf"]
-        for f in resp.json()["features"]
-        if shape(f["geometry"]).intersects(buffered_polygon)
-    ]
-
-
-def download_pbfs(urls: list[str], dest_dir: Path) -> list[Path]:
-    """Download PBF files to dest_dir, skipping already-downloaded files.
-
-    :param urls: List of Geofabrik PBF URLs.
-    :param dest_dir: Directory to store downloaded files.
-    :returns: List of paths to downloaded PBF files.
-    """
-    paths = []
-    for url in urls:
-        dest = dest_dir / Path(url).name
-        if not dest.exists():
-            print(f"Downloading {url}")
-            with requests.get(url, stream=True, timeout=300) as r:
-                r.raise_for_status()
-                with dest.open("wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-        else:
-            print(f"Already downloaded: {dest.name}")
-        paths.append(dest)
-    return paths
-
-
-def collect_pbfs_from_cache(cache_dir: Path) -> list[Path]:
-    """Collect all .osm.pbf files from a cache directory.
-
-    :param cache_dir: Directory containing manually downloaded PBF files.
-    :returns: List of PBF paths found.
-    :raises SystemExit: If the cache dir is missing or empty.
-    """
-    if not cache_dir.exists():
-        sys.exit(f"Cache dir '{cache_dir}' does not exist.")
-    paths = sorted(cache_dir.glob("*.osm.pbf"))
+    if not pbf_dir.exists():
+        sys.exit(f"--pbf-dir '{pbf_dir}' does not exist.")
+    paths = sorted(pbf_dir.glob("*.osm.pbf"))
     if not paths:
-        sys.exit(f"No .osm.pbf files found in '{cache_dir}'.")
+        sys.exit(f"No .osm.pbf files found in '{pbf_dir}'.")
     return paths
 
 
@@ -177,20 +132,23 @@ def main() -> None:
         "--buffer-km", type=float, default=50.0, help="Buffer distance in km (default: 50)"
     )
     parser.add_argument(
-        "--output", type=Path, default=None, help="Output .osm.pbf path (default: {area}_graph.osm.pbf)"
-    )
-    parser.add_argument(
-        "--cache-dir",
+        "--output",
         type=Path,
         default=None,
-        help="Directory of pre-downloaded PBFs; skips downloading",
+        help="Output .osm.pbf path (default: data/{area}_graph.osm.pbf)",
+    )
+    parser.add_argument(
+        "--pbf-dir",
+        required=True,
+        type=Path,
+        help="Directory of manually downloaded Geofabrik PBFs",
     )
     args = parser.parse_args()
 
     area_slug = args.area.lower().replace(" ", "_")
     data_dir = Path(__file__).parent.parent / "data"
     data_dir.mkdir(exist_ok=True)
-    output_path = args.output or Path(f"{area_slug}_graph.osm.pbf")
+    output_path = args.output or data_dir / f"{area_slug}_graph.osm.pbf"
 
     print(f"Loading polygon for '{args.area}'...")
     polygon = load_polygon_from_admins(args.admins_db, args.area)
@@ -203,28 +161,12 @@ def main() -> None:
     save_geojson(buffered, buffered_path)
     print(f"Buffered polygon → {buffered_path}")
 
-    if args.cache_dir:
-        print(f"Using PBFs from {args.cache_dir}")
-        pbf_paths = collect_pbfs_from_cache(args.cache_dir)
-        for p in pbf_paths:
-            print(f"  {p.name}")
-        build_extract(pbf_paths, buffered_path, output_path)
-    else:
-        print("Fetching Geofabrik index...")
-        urls = find_intersecting_urls(buffered)
-        print(f"\nIntersecting extracts ({len(urls)}):")
-        for u in urls:
-            print(f"  {u}")
-        print(
-            "\nWARNING: some extracts are several GB. Consider using --cache-dir with manually selected PBFs."
-        )
-        if input("\nProceed with downloading all? [y/N] ").strip().lower() != "y":
-            print("Aborted. Re-run with --cache-dir.")
-            sys.exit(0)
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            pbf_paths = download_pbfs(urls, Path(tmp_dir))
-            build_extract(pbf_paths, buffered_path, output_path)
+    pbf_paths = collect_pbfs(args.pbf_dir)
+    print(f"Using {len(pbf_paths)} PBF(s) from {args.pbf_dir}:")
+    for p in pbf_paths:
+        print(f"  {p.name}")
 
+    build_extract(pbf_paths, buffered_path, output_path)
     print(f"Done → {output_path}")
 
 

@@ -8,8 +8,6 @@ license-files = ["LICENSE"]
 
 requires-python = ">=3.11"
 dependencies = [
-    "pyproj>=3.0",
-    "requests>=2.0",
     "shapely>=2.0",
 ]
 

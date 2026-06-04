@@ -1,3 +1,7 @@
+# scripts/
+
+## prepare_area.py
+
 Prepares an OSM extract for a given country, ready for `valhalla_build_tiles`.
 
 **What it does:**
@@ -15,18 +19,12 @@ sudo apt-get install -y libsqlite3-mod-spatialite osmium-tool
 ### Usage
 
 ```bash
-uv run python scripts/prepare_area.py \
-  --area liechtenstein \
-  --admins-db /path/to/admins.sqlite \
-  --buffer-km 50 \
-  --cache-dir /path/to/pbf-cache
+uv run python scripts/prepare_area.py --help
 ```
 
-Place the relevant Geofabrik PBFs in `--cache-dir` before running. Run without `--cache-dir`
-to see which extracts intersect the buffered area (use this as a reference for which PBFs to download).
+Download the relevant Geofabrik PBFs manually into a directory and pass it via `--pbf-dir`.
+For Liechtenstein, the required extracts are `liechtenstein-latest`, `switzerland-latest`, and `austria-latest`.
 
 **Notes**
 
 **Extract before merge.** Cutting each PBF to the buffered polygon first keeps the merge small and avoids osmium failing on overlapping border objects across files with different timestamps.
-
-
