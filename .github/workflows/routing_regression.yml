@@ -1,0 +1,158 @@
+name: Routing Regression
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-valhalla:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Valhalla
+        uses: actions/checkout@v4
+        with:
+          repository: valhalla/valhalla
+          ref: 3.7.0
+          submodules: recursive
+
+      - name: Restore ccache
+        uses: tespkg/actions-cache/restore@v1
+        with:
+          endpoint: ${{ secrets.HETZNER_S3_ENDPOINT }}
+          accessKey: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
+          bucket: rad-cache
+          path: ~/.cache/ccache
+          key: ccache-valhalla-${{ github.ref_name }}
+          restore-keys: |
+            ccache-valhalla-main
+            ccache-valhalla
+
+      - name: Install dependencies
+        # TODO: replace with targeted dep install once GHA base image is confirmed
+        run: bash scripts/install-linux-deps.sh
+
+      - name: Build Valhalla
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_PYTHON_BINDINGS=ON \
+            -DENABLE_SERVICES=OFF \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_BENCHMARKS=OFF \
+            -DENABLE_CCACHE=ON
+          make -C build -j$(nproc)
+          sudo make -C build install
+
+      - name: Save ccache
+        if: always()
+        uses: tespkg/actions-cache/save@v1
+        with:
+          endpoint: ${{ secrets.HETZNER_S3_ENDPOINT }}
+          accessKey: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
+          bucket: rad-cache
+          path: ~/.cache/ccache
+          key: ccache-valhalla-${{ github.ref_name }}
+
+      # TODO: package installed valhalla binaries + python wheel as artifact
+      # so build-tiles and run-routes can use the built code without rebuilding
+
+  build-tiles:
+    runs-on: ubuntu-24.04
+    needs: build-valhalla
+    steps:
+      - name: Checkout RAD
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      # TODO: download last successful tiles artifact here first;
+      # only run build-tiles if no valid artifact exists (cache miss logic)
+      - name: Build graph tiles
+        # TODO: replace inline shell with scripts/build_tiles.py once implemented
+        # TODO: admins.sqlite (500MB) is not in the repo — needs a download step or separate artifact
+        run: |
+          python3 -m valhalla valhalla_build_config \
+            --mjolnir-tile-dir valhalla_tiles \
+            --mjolnir-admin admins.sqlite > valhalla.json
+          python3 -m valhalla valhalla_build_tiles -c valhalla.json data/liechtenstein_graph.osm.pbf
+
+      - name: Upload tiles artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: valhalla-tiles
+          path: valhalla_tiles/
+          retention-days: 90
+
+  run-routes:
+    runs-on: ubuntu-24.04
+    needs: build-tiles
+    strategy:
+      matrix:
+        router: [old, new]
+    steps:
+      - name: Checkout RAD
+        uses: actions/checkout@v4
+
+      - name: Checkout RAD-data
+        uses: actions/checkout@v4
+        with:
+          repository: valhalla/RAD-data
+          path: RAD-data
+          token: ${{ secrets.RAD_DATA_TOKEN }}
+
+      - name: Download tiles artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: valhalla-tiles
+          path: valhalla_tiles/
+
+      - name: Install pyvalhalla
+        # TODO: replace with wheel built from source in build-valhalla job
+        # so routing uses the actual PR branch code, not a fixed PyPI release
+        run: pip install pyvalhalla
+
+      - name: Run route requests
+        # TODO: implement scripts/run_routes.py
+        # reads RAD-data/requests/requests.jsonl
+        # uses pyvalhalla Actor to send each request
+        # writes responses to RAD-data/responses/${{ matrix.router }}.jsonl
+        run: |
+          echo "TODO: python3 scripts/run_routes.py \
+            --requests RAD-data/requests/requests.jsonl \
+            --tiles valhalla_tiles/ \
+            --output RAD-data/responses/${{ matrix.router }}.jsonl"
+
+      - name: Push responses to RAD-data
+        # TODO: implement scripts/push_results.py
+        # responses must be pushed here before diff-and-store runs,
+        # since each matrix runner is a separate machine
+        run: |
+          echo "TODO: python3 scripts/push_results.py --repo RAD-data --stage responses"
+
+  diff-and-store:
+    runs-on: ubuntu-24.04
+    needs: run-routes
+    steps:
+      - name: Checkout RAD-data
+        uses: actions/checkout@v4
+        with:
+          repository: valhalla/RAD-data
+          path: RAD-data
+          token: ${{ secrets.RAD_DATA_TOKEN }}
+
+      - name: Compute diff
+        # TODO: implement scripts/diff_responses.py
+        # reads RAD-data/responses/old.jsonl and new.jsonl
+        # writes RAD-data/diffs/<run-id>.json
+        run: |
+          echo "TODO: python3 scripts/diff_responses.py \
+            --old RAD-data/responses/old.jsonl \
+            --new RAD-data/responses/new.jsonl \
+            --output RAD-data/diffs/${{ github.run_id }}.json"
+
+      - name: Push results to RAD-data
+        # TODO: implement scripts/push_results.py
+        # git add + commit + push to RAD-data
+        run: |
+          echo "TODO: python3 scripts/push_results.py --repo RAD-data"
