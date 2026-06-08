@@ -19,6 +19,5 @@ build/
 .DS_Store
 
 *_buffered.geojson
-*_graph.osm.pbf
 valhalla.json
 valhalla_tiles/
