@@ -18,13 +18,13 @@ jobs:
     runs-on: ubuntu-24.04
     needs: build-valhalla
     steps:
-      - name: Checkout RAD
-        uses: actions/checkout@v4
+      - name: Checkout PBF
+        uses: actions/checkout@v6
         with:
           lfs: true
 
       - name: Checkout Valhalla
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: valhalla/valhalla
           ref: ${{ inputs.valhalla_ref }}
@@ -53,7 +53,10 @@ jobs:
             -DENABLE_SERVICES=OFF \
             -DENABLE_TESTS=OFF \
             -DENABLE_BENCHMARKS=OFF \
-            -DENABLE_CCACHE=ON
+            -DENABLE_CCACHE=ON \
+            -DENABLE_TOOLS=OFF \
+            -DENABLE_GEOTIFF=OFF \
+            -DENABLE_LZ4=OFF
           make -C valhalla-src/build -j$(nproc)
           sudo make -C valhalla-src/build install
 
@@ -69,12 +72,10 @@ jobs:
           key: ccache-valhalla-${{ inputs.valhalla_ref }}
 
       - name: Build graph tiles
-        # TODO: admins.sqlite (500MB) not in repo — needs separate solution
-        # TODO: replace inline shell with scripts/build_tiles.py
         run: |
+          valhalla_build_admins -c valhalla.json data/liechtenstein_graph.osm.pbf
           valhalla_build_config \
-            --mjolnir-tile-dir valhalla_tiles \
-            --mjolnir-admin admins.sqlite > valhalla.json
+            --mjolnir-tile-dir valhalla_tiles > valhalla.json
           valhalla_build_tiles -c valhalla.json data/liechtenstein_graph.osm.pbf
 
       - name: Upload tiles artifact

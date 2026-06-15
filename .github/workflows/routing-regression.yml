@@ -38,17 +38,16 @@ jobs:
             name: new
     steps:
       - name: Checkout RAD
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout RAD-data
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: valhalla/RAD-data
           path: RAD-data
-          token: ${{ secrets.RAD_DATA_TOKEN }}
 
       - name: Checkout Valhalla at router ref
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: valhalla/valhalla
           ref: ${{ matrix.router.ref }}
@@ -57,7 +56,7 @@ jobs:
 
       - name: Download tiles artifact
         # TODO: when tiles come from a previous run, actions/download-artifact@v4
-        # only fetches from the current run — needs cross-run solution via GitHub API
+        # only fetches from the current run - needs cross-run solution via GitHub API
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.tiles_artifact }}
@@ -85,7 +84,10 @@ jobs:
             -DENABLE_SERVICES=OFF \
             -DENABLE_TESTS=OFF \
             -DENABLE_BENCHMARKS=OFF \
-            -DENABLE_CCACHE=ON
+            -DENABLE_CCACHE=ON \
+            -DENABLE_TOOLS=OFF \
+            -DENABLE_GEOTIFF=OFF \
+            -DENABLE_LZ4=OFF
           make -C valhalla-src/build -j$(nproc)
           sudo make -C valhalla-src/build install
 
@@ -124,11 +126,10 @@ jobs:
     if: always()
     steps:
       - name: Checkout RAD-data
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: valhalla/RAD-data
           path: RAD-data
-          token: ${{ secrets.RAD_DATA_TOKEN }}
 
       - name: Compute diff
         # TODO: implement scripts/diff_responses.py

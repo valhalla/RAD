@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout Valhalla
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: valhalla/valhalla
           ref: ${{ inputs.valhalla_ref }}
@@ -32,7 +32,6 @@ jobs:
           restore-keys: ccache-valhalla-master
 
       - name: Install dependencies
-        # TODO: replace with targeted dep install once GHA base image is confirmed
         run: bash valhalla-src/scripts/install-linux-deps.sh
 
       - name: Build Valhalla
@@ -43,7 +42,10 @@ jobs:
             -DENABLE_SERVICES=OFF \
             -DENABLE_TESTS=OFF \
             -DENABLE_BENCHMARKS=OFF \
-            -DENABLE_CCACHE=ON
+            -DENABLE_CCACHE=ON \
+            -DENABLE_TOOLS=OFF \
+            -DENABLE_GEOTIFF=OFF \
+            -DENABLE_LZ4=OFF
           make -C valhalla-src/build -j$(nproc)
           sudo make -C valhalla-src/build install
 
