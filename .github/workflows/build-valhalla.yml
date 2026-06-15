@@ -1,0 +1,59 @@
+name: Build Valhalla
+
+on:
+  workflow_call:
+    inputs:
+      valhalla_ref:
+        description: "Valhalla git ref to build (branch, tag, or SHA)"
+        type: string
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Valhalla
+        uses: actions/checkout@v4
+        with:
+          repository: valhalla/valhalla
+          ref: ${{ inputs.valhalla_ref }}
+          submodules: recursive
+          path: valhalla-src
+
+      - name: Restore ccache
+        uses: tespkg/actions-cache/restore@v1
+        with:
+          endpoint: ${{ secrets.HETZNER_S3_ENDPOINT }}
+          accessKey: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
+          bucket: rad-cache
+          path: ~/.cache/ccache
+          key: ccache-valhalla-${{ inputs.valhalla_ref }}
+          restore-keys: ccache-valhalla-master
+
+      - name: Install dependencies
+        # TODO: replace with targeted dep install once GHA base image is confirmed
+        run: bash valhalla-src/scripts/install-linux-deps.sh
+
+      - name: Build Valhalla
+        run: |
+          cmake -B valhalla-src/build -S valhalla-src \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_PYTHON_BINDINGS=ON \
+            -DENABLE_SERVICES=OFF \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_BENCHMARKS=OFF \
+            -DENABLE_CCACHE=ON
+          make -C valhalla-src/build -j$(nproc)
+          sudo make -C valhalla-src/build install
+
+      - name: Save ccache
+        if: always()
+        uses: tespkg/actions-cache/save@v1
+        with:
+          endpoint: ${{ secrets.HETZNER_S3_ENDPOINT }}
+          accessKey: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
+          bucket: rad-cache
+          path: ~/.cache/ccache
+          key: ccache-valhalla-${{ inputs.valhalla_ref }}

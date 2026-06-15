@@ -1,0 +1,85 @@
+name: Build Tiles
+
+on:
+  workflow_dispatch:
+    inputs:
+      valhalla_ref:
+        description: "Valhalla ref to build tiles with (e.g. master)"
+        default: master
+
+jobs:
+  build-valhalla:
+    uses: ./.github/workflows/build-valhalla.yml
+    with:
+      valhalla_ref: ${{ inputs.valhalla_ref }}
+    secrets: inherit
+
+  build-tiles:
+    runs-on: ubuntu-24.04
+    needs: build-valhalla
+    steps:
+      - name: Checkout RAD
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Checkout Valhalla
+        uses: actions/checkout@v4
+        with:
+          repository: valhalla/valhalla
+          ref: ${{ inputs.valhalla_ref }}
+          submodules: recursive
+          path: valhalla-src
+
+      - name: Restore ccache
+        uses: tespkg/actions-cache/restore@v1
+        with:
+          endpoint: ${{ secrets.HETZNER_S3_ENDPOINT }}
+          accessKey: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
+          bucket: rad-cache
+          path: ~/.cache/ccache
+          key: ccache-valhalla-${{ inputs.valhalla_ref }}
+          restore-keys: ccache-valhalla-master
+
+      - name: Install dependencies
+        run: bash valhalla-src/scripts/install-linux-deps.sh
+
+      - name: Rebuild Valhalla
+        run: |
+          cmake -B valhalla-src/build -S valhalla-src \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_PYTHON_BINDINGS=ON \
+            -DENABLE_SERVICES=OFF \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_BENCHMARKS=OFF \
+            -DENABLE_CCACHE=ON
+          make -C valhalla-src/build -j$(nproc)
+          sudo make -C valhalla-src/build install
+
+      - name: Save ccache
+        if: always()
+        uses: tespkg/actions-cache/save@v1
+        with:
+          endpoint: ${{ secrets.HETZNER_S3_ENDPOINT }}
+          accessKey: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
+          bucket: rad-cache
+          path: ~/.cache/ccache
+          key: ccache-valhalla-${{ inputs.valhalla_ref }}
+
+      - name: Build graph tiles
+        # TODO: admins.sqlite (500MB) not in repo — needs separate solution
+        # TODO: replace inline shell with scripts/build_tiles.py
+        run: |
+          valhalla_build_config \
+            --mjolnir-tile-dir valhalla_tiles \
+            --mjolnir-admin admins.sqlite > valhalla.json
+          valhalla_build_tiles -c valhalla.json data/liechtenstein_graph.osm.pbf
+
+      - name: Upload tiles artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: valhalla-tiles-${{ inputs.valhalla_ref }}
+          path: valhalla_tiles/
+          retention-days: 90
