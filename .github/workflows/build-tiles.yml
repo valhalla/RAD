@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       valhalla_ref:
-        description: "Valhalla ref to build tiles with (e.g. master)"
+        description: "Valhalla ref to use for tile building (branch, tag, or SHA)"
         default: master
+        required: false
 
 jobs:
   build-valhalla:
@@ -15,72 +16,44 @@ jobs:
     secrets: inherit
 
   build-tiles:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     needs: build-valhalla
+
     steps:
+      - name: Sanitize ref for artifact name
+        id: sanitize
+        run: echo "ref_slug=$(echo '${{ inputs.valhalla_ref }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
       - name: Checkout PBF
         uses: actions/checkout@v6
         with:
           lfs: true
 
-      - name: Checkout Valhalla
-        uses: actions/checkout@v6
+      - name: Download Valhalla wheel
+        uses: actions/download-artifact@v4
         with:
-          repository: valhalla/valhalla
-          ref: ${{ inputs.valhalla_ref }}
-          submodules: recursive
-          path: valhalla-src
+          name: valhalla-wheel-${{ steps.sanitize.outputs.ref_slug }}
+          path: /tmp/valhalla-dist
 
-      - name: Restore ccache
-        uses: tespkg/actions-cache/restore@v1
-        with:
-          endpoint: ${{ secrets.HETZNER_S3_ENDPOINT }}
-          accessKey: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
-          secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
-          bucket: rad-cache
-          path: ~/.cache/ccache
-          key: ccache-valhalla-${{ inputs.valhalla_ref }}
-          restore-keys: ccache-valhalla-master
-
-      - name: Install dependencies
-        run: bash valhalla-src/scripts/install-linux-deps.sh
-
-      - name: Rebuild Valhalla
-        run: |
-          cmake -B valhalla-src/build -S valhalla-src \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DENABLE_PYTHON_BINDINGS=ON \
-            -DENABLE_SERVICES=OFF \
-            -DENABLE_TESTS=OFF \
-            -DENABLE_BENCHMARKS=OFF \
-            -DENABLE_CCACHE=ON \
-            -DENABLE_TOOLS=OFF \
-            -DENABLE_GEOTIFF=OFF \
-            -DENABLE_LZ4=OFF
-          make -C valhalla-src/build -j$(nproc)
-          sudo make -C valhalla-src/build install
-
-      - name: Save ccache
-        if: always()
-        uses: tespkg/actions-cache/save@v1
-        with:
-          endpoint: ${{ secrets.HETZNER_S3_ENDPOINT }}
-          accessKey: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
-          secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
-          bucket: rad-cache
-          path: ~/.cache/ccache
-          key: ccache-valhalla-${{ inputs.valhalla_ref }}
+      - name: Install Valhalla from wheel
+        run: pip install /tmp/valhalla-dist/*.whl
 
       - name: Build graph tiles
         run: |
-          valhalla_build_admins -c valhalla.json data/liechtenstein_graph.osm.pbf
           valhalla_build_config \
-            --mjolnir-tile-dir valhalla_tiles > valhalla.json
-          valhalla_build_tiles -c valhalla.json data/liechtenstein_graph.osm.pbf
+            --mjolnir-tile-dir "$(pwd)/valhalla_tiles" \
+            --mjolnir-admin "$(pwd)/valhalla_tiles/admins.sqlite" \
+            > valhalla.json
+          python -m valhalla valhalla_build_admins --config valhalla.json data/liechtenstein_graph.osm.pbf
+          python -m valhalla valhalla_build_tiles --config valhalla.json data/liechtenstein_graph.osm.pbf
+          find valhalla_tiles -name "*.gph" | wc -l
 
       - name: Upload tiles artifact
         uses: actions/upload-artifact@v4
         with:
-          name: valhalla-tiles-${{ inputs.valhalla_ref }}
+          name: valhalla-tiles-${{ steps.sanitize.outputs.ref_slug }}
           path: valhalla_tiles/
           retention-days: 90
+
+      - name: Print run ID
+        run: echo "tiles_run_id = ${{ github.run_id }}"

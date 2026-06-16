@@ -4,14 +4,25 @@ on:
   workflow_call:
     inputs:
       valhalla_ref:
-        description: "Valhalla git ref to build (branch, tag, or SHA)"
+        description: "Valhalla git ref to build (branch, tag, or commit SHA)"
         type: string
         required: true
+    outputs:
+      wheel_artifact:
+        description: "Name of the uploaded wheel artifact"
+        value: ${{ jobs.build.outputs.wheel_artifact }}
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    outputs:
+      wheel_artifact: ${{ steps.set-output.outputs.wheel_artifact }}
+
     steps:
+      - name: Sanitize ref for artifact name
+        id: sanitize
+        run: echo "ref_slug=$(echo '${{ inputs.valhalla_ref }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
       - name: Checkout Valhalla
         uses: actions/checkout@v6
         with:
@@ -28,26 +39,25 @@ jobs:
           secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
           bucket: rad-cache
           path: ~/.cache/ccache
-          key: ccache-valhalla-${{ inputs.valhalla_ref }}
-          restore-keys: ccache-valhalla-master
+          key: ccache-valhalla-${{ steps.sanitize.outputs.ref_slug }}-${{ github.sha }}
+          restore-keys: |
+            ccache-valhalla-${{ steps.sanitize.outputs.ref_slug }}-
+            ccache-valhalla-master-
 
-      - name: Install dependencies
+      - name: Install system dependencies
         run: bash valhalla-src/scripts/install-linux-deps.sh
 
-      - name: Build Valhalla
+      - name: Install Python build dependencies
+        run: pip install scikit-build-core pyproject-metadata setuptools-scm pybind11
+
+      - name: Build wheel
         run: |
-          cmake -B valhalla-src/build -S valhalla-src \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DENABLE_PYTHON_BINDINGS=ON \
-            -DENABLE_SERVICES=OFF \
-            -DENABLE_TESTS=OFF \
-            -DENABLE_BENCHMARKS=OFF \
-            -DENABLE_CCACHE=ON \
-            -DENABLE_TOOLS=OFF \
-            -DENABLE_GEOTIFF=OFF \
-            -DENABLE_LZ4=OFF
-          make -C valhalla-src/build -j$(nproc)
-          sudo make -C valhalla-src/build install
+          cd valhalla-src
+          pip wheel . --no-build-isolation --wheel-dir /tmp/valhalla-dist \
+            -Ccmake.build-type=Release \
+            -Ccmake.define.ENABLE_PYTHON_BINDINGS=ON \
+            -Ccmake.define.ENABLE_TESTS=OFF \
+            -Ccmake.define.ENABLE_SERVICES=OFF
 
       - name: Save ccache
         if: always()
@@ -58,4 +68,15 @@ jobs:
           secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
           bucket: rad-cache
           path: ~/.cache/ccache
-          key: ccache-valhalla-${{ inputs.valhalla_ref }}
+          key: ccache-valhalla-${{ steps.sanitize.outputs.ref_slug }}-${{ github.sha }}
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: valhalla-wheel-${{ steps.sanitize.outputs.ref_slug }}
+          path: /tmp/valhalla-dist/*.whl
+          retention-days: 7
+
+      - name: Set output
+        id: set-output
+        run: echo "wheel_artifact=valhalla-wheel-${{ steps.sanitize.outputs.ref_slug }}" >> $GITHUB_OUTPUT

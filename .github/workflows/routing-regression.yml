@@ -4,14 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       valhalla_ref_old:
-        description: "Valhalla ref for old router (e.g. master)"
+        description: "Baseline Valhalla ref (the 'before')"
         default: master
-      valhalla_ref_new:
-        description: "Valhalla ref for new router (e.g. PR branch or SHA)"
         required: true
-      tiles_artifact:
-        description: "Tiles artifact name to use (e.g. valhalla-tiles-master)"
-        default: valhalla-tiles-master
+      valhalla_ref_new:
+        description: "New Valhalla ref to test (the 'after' — branch, tag, or SHA)"
+        required: true
+      tiles_run_id:
+        description: "Run ID from a successful build-tiles.yml run"
+        required: true
 
 jobs:
   build-valhalla-old:
@@ -27,15 +28,74 @@ jobs:
     secrets: inherit
 
   run-routes:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     needs: [build-valhalla-old, build-valhalla-new]
     strategy:
       matrix:
         router:
-          - ref: ${{ inputs.valhalla_ref_old }}
-            name: old
-          - ref: ${{ inputs.valhalla_ref_new }}
-            name: new
+          - name: old
+            ref: ${{ inputs.valhalla_ref_old }}
+          - name: new
+            ref: ${{ inputs.valhalla_ref_new }}
+
+    steps:
+      - name: Sanitize ref for artifact name
+        id: sanitize
+        run: echo "ref_slug=$(echo '${{ matrix.router.ref }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
+      - name: Checkout RAD
+        uses: actions/checkout@v6
+
+      - name: Checkout RAD-data
+        uses: actions/checkout@v6
+        with:
+          repository: valhalla/RAD-data
+          path: RAD-data
+          token: ${{ secrets.RAD_DATA_TOKEN }}
+
+      - name: Download Valhalla wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: valhalla-wheel-${{ steps.sanitize.outputs.ref_slug }}
+          path: /tmp/valhalla-dist
+
+      - name: Install Valhalla from wheel
+        run: pip install /tmp/valhalla-dist/*.whl
+
+      - name: Download tiles from build-tiles run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download ${{ inputs.tiles_run_id }} \
+            --repo "${{ github.repository }}" \
+            --pattern "valhalla-tiles-*" \
+            --dir valhalla_tiles
+          shopt -s dotglob
+          mv valhalla_tiles/valhalla-tiles-*/* valhalla_tiles/ 2>/dev/null || true
+
+      - name: Run route requests
+        run: |
+          valhalla_build_config \
+            --mjolnir-tile-dir "$(pwd)/valhalla_tiles" \
+            > /tmp/valhalla.json
+          python3 scripts/run_routes.py \
+            --config /tmp/valhalla.json \
+            --requests RAD-data/requests/requests.jsonl \
+            --output /tmp/responses-${{ matrix.router.name }}.jsonl
+
+      - name: Upload responses artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: responses-${{ matrix.router.name }}
+          path: /tmp/responses-${{ matrix.router.name }}.jsonl
+          retention-days: 7
+
+  diff-and-store:
+    runs-on: ubuntu-latest
+    needs: run-routes
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout RAD
         uses: actions/checkout@v6
@@ -45,103 +105,26 @@ jobs:
         with:
           repository: valhalla/RAD-data
           path: RAD-data
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout Valhalla at router ref
-        uses: actions/checkout@v6
-        with:
-          repository: valhalla/valhalla
-          ref: ${{ matrix.router.ref }}
-          submodules: recursive
-          path: valhalla-src
-
-      - name: Download tiles artifact
-        # TODO: when tiles come from a previous run, actions/download-artifact@v4
-        # only fetches from the current run - needs cross-run solution via GitHub API
+      - name: Download responses
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.tiles_artifact }}
-          path: valhalla_tiles/
+          pattern: responses-*
+          path: /tmp/responses
+          merge-multiple: false
 
-      - name: Restore ccache
-        uses: tespkg/actions-cache/restore@v1
-        with:
-          endpoint: ${{ secrets.HETZNER_S3_ENDPOINT }}
-          accessKey: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
-          secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
-          bucket: rad-cache
-          path: ~/.cache/ccache
-          key: ccache-valhalla-${{ matrix.router.ref }}
-          restore-keys: ccache-valhalla-master
-
-      - name: Install dependencies
-        run: bash valhalla-src/scripts/install-linux-deps.sh
-
-      - name: Build Valhalla at router ref
+      - name: Compute diff and push to RAD-data
         run: |
-          cmake -B valhalla-src/build -S valhalla-src \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DENABLE_PYTHON_BINDINGS=ON \
-            -DENABLE_SERVICES=OFF \
-            -DENABLE_TESTS=OFF \
-            -DENABLE_BENCHMARKS=OFF \
-            -DENABLE_CCACHE=ON \
-            -DENABLE_TOOLS=OFF \
-            -DENABLE_GEOTIFF=OFF \
-            -DENABLE_LZ4=OFF
-          make -C valhalla-src/build -j$(nproc)
-          sudo make -C valhalla-src/build install
-
-      - name: Save ccache
-        if: always()
-        uses: tespkg/actions-cache/save@v1
-        with:
-          endpoint: ${{ secrets.HETZNER_S3_ENDPOINT }}
-          accessKey: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
-          secretKey: ${{ secrets.HETZNER_S3_ACCESS_SECRET }}
-          bucket: rad-cache
-          path: ~/.cache/ccache
-          key: ccache-valhalla-${{ matrix.router.ref }}
-
-      - name: Run route requests
-        # TODO: implement scripts/run_routes.py
-        # reads RAD-data/requests/requests.jsonl
-        # uses pyvalhalla bindings built from source
-        # writes to RAD-data/responses/${{ matrix.router.name }}.jsonl
-        run: |
-          echo "TODO: python3 scripts/run_routes.py \
-            --requests RAD-data/requests/requests.jsonl \
-            --tiles valhalla_tiles/ \
-            --output RAD-data/responses/${{ matrix.router.name }}.jsonl"
-
-      - name: Push responses to RAD-data
-        # TODO: implement scripts/push_results.py
-        # race condition risk if both matrix jobs push simultaneously —
-        # consider pushing responses as GHA artifacts instead, let diff-and-store handle RAD-data push
-        run: |
-          echo "TODO: python3 scripts/push_results.py --repo RAD-data --stage responses"
-
-  diff-and-store:
-    runs-on: ubuntu-24.04
-    needs: run-routes
-    if: always()
-    steps:
-      - name: Checkout RAD-data
-        uses: actions/checkout@v6
-        with:
-          repository: valhalla/RAD-data
-          path: RAD-data
-
-      - name: Compute diff
-        # TODO: implement scripts/diff_responses.py
-        # reads RAD-data/responses/old.jsonl and new.jsonl
-        # writes RAD-data/diffs/<run-id>.json
-        run: |
-          echo "TODO: python3 scripts/diff_responses.py \
-            --old RAD-data/responses/old.jsonl \
-            --new RAD-data/responses/new.jsonl \
-            --output RAD-data/diffs/${{ github.run_id }}.json"
-
-      - name: Push diff to RAD-data
-        # TODO: implement scripts/push_results.py
-        run: |
-          echo "TODO: python3 scripts/push_results.py --repo RAD-data --stage diff"
+          python3 scripts/diff_responses.py \
+            --old /tmp/responses/responses-old/responses-old.jsonl \
+            --new /tmp/responses/responses-new/responses-new.jsonl \
+            --old-ref "${{ inputs.valhalla_ref_old }}" \
+            --new-ref "${{ inputs.valhalla_ref_new }}" \
+            --output RAD-data/diffs/${{ github.run_id }}.json
+          cd RAD-data
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add diffs/${{ github.run_id }}.json
+          git commit -m "regression: ${{ inputs.valhalla_ref_old }} vs ${{ inputs.valhalla_ref_new }} (run ${{ github.run_id }})"
+          git push
