@@ -1,0 +1,130 @@
+name: Routing Regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      valhalla_ref_old:
+        description: "Baseline Valhalla ref (the 'before')"
+        default: master
+        required: true
+      valhalla_ref_new:
+        description: "New Valhalla ref to test (the 'after' — branch, tag, or SHA)"
+        required: true
+      tiles_run_id:
+        description: "Run ID from a successful build-tiles.yml run"
+        required: true
+
+jobs:
+  build-valhalla-old:
+    uses: ./.github/workflows/build-valhalla.yml
+    with:
+      valhalla_ref: ${{ inputs.valhalla_ref_old }}
+    secrets: inherit
+
+  build-valhalla-new:
+    uses: ./.github/workflows/build-valhalla.yml
+    with:
+      valhalla_ref: ${{ inputs.valhalla_ref_new }}
+    secrets: inherit
+
+  run-routes:
+    runs-on: ubuntu-latest
+    needs: [build-valhalla-old, build-valhalla-new]
+    strategy:
+      matrix:
+        router:
+          - name: old
+            ref: ${{ inputs.valhalla_ref_old }}
+          - name: new
+            ref: ${{ inputs.valhalla_ref_new }}
+
+    steps:
+      - name: Sanitize ref for artifact name
+        id: sanitize
+        run: echo "ref_slug=$(echo '${{ matrix.router.ref }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
+      - name: Checkout RAD
+        uses: actions/checkout@v6
+
+      - name: Checkout RAD-data
+        uses: actions/checkout@v6
+        with:
+          repository: valhalla/RAD-data
+          path: RAD-data
+          token: ${{ secrets.RAD_DATA_TOKEN }}
+
+      - name: Download Valhalla wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: valhalla-wheel-${{ steps.sanitize.outputs.ref_slug }}
+          path: /tmp/valhalla-dist
+
+      - name: Install Valhalla from wheel
+        run: pip install /tmp/valhalla-dist/*.whl
+
+      - name: Download tiles from build-tiles run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download ${{ inputs.tiles_run_id }} \
+            --repo "${{ github.repository }}" \
+            --pattern "valhalla-tiles-*" \
+            --dir valhalla_tiles
+          shopt -s dotglob
+          mv valhalla_tiles/valhalla-tiles-*/* valhalla_tiles/ 2>/dev/null || true
+
+      - name: Run route requests
+        run: |
+          valhalla_build_config \
+            --mjolnir-tile-dir "$(pwd)/valhalla_tiles" \
+            > /tmp/valhalla.json
+          python3 scripts/run_routes.py \
+            --config /tmp/valhalla.json \
+            --requests RAD-data/requests/requests.jsonl \
+            --output /tmp/responses-${{ matrix.router.name }}.jsonl
+
+      - name: Upload responses artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: responses-${{ matrix.router.name }}
+          path: /tmp/responses-${{ matrix.router.name }}.jsonl
+          retention-days: 7
+
+  diff-and-store:
+    runs-on: ubuntu-latest
+    needs: run-routes
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout RAD
+        uses: actions/checkout@v6
+
+      - name: Checkout RAD-data
+        uses: actions/checkout@v6
+        with:
+          repository: valhalla/RAD-data
+          path: RAD-data
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download responses
+        uses: actions/download-artifact@v4
+        with:
+          pattern: responses-*
+          path: /tmp/responses
+          merge-multiple: false
+
+      - name: Compute diff and push to RAD-data
+        run: |
+          python3 scripts/diff_responses.py \
+            --old /tmp/responses/responses-old/responses-old.jsonl \
+            --new /tmp/responses/responses-new/responses-new.jsonl \
+            --old-ref "${{ inputs.valhalla_ref_old }}" \
+            --new-ref "${{ inputs.valhalla_ref_new }}" \
+            --output RAD-data/diffs/${{ github.run_id }}.json
+          cd RAD-data
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add diffs/${{ github.run_id }}.json
+          git commit -m "regression: ${{ inputs.valhalla_ref_old }} vs ${{ inputs.valhalla_ref_new }} (run ${{ github.run_id }})"
+          git push
