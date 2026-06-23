@@ -1,0 +1,43 @@
+name: Build Tiles
+description: >
+  Builds a routable Valhalla graph extract from a PBF, using the Valhalla
+  install already present on the runner. Outputs a single tile_extract tar.
+
+inputs:
+  pbf_path:
+    description: "Path to the OSM PBF to build the graph from"
+    required: true
+  tile_dir:
+    description: "Working directory to build raw tiles into before bundling"
+    required: false
+    default: "valhalla_tiles"
+
+outputs:
+  tile_extract:
+    description: "Absolute path to the built, uncompressed tile extract tar"
+    value: ${{ steps.extract.outputs.tile_extract }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build config, admins, and tiles
+      shell: bash
+      run: |
+        mkdir -p "${{ inputs.tile_dir }}"
+        valhalla_build_config \
+          --mjolnir-tile-dir "${{ inputs.tile_dir }}" \
+          --mjolnir-admin "${{ inputs.tile_dir }}/admins.sqlite" \
+          --mjolnir-tile-extract "${{ inputs.tile_dir }}/tiles.tar" \
+          > /tmp/valhalla-build.json
+        valhalla_build_admins -c /tmp/valhalla-build.json "${{ inputs.pbf_path }}"
+        valhalla_build_tiles -c /tmp/valhalla-build.json "${{ inputs.pbf_path }}"
+
+    - name: Bundle tiles into a single extract
+      id: extract
+      shell: bash
+      run: |
+        valhalla_build_extract -c /tmp/valhalla-build.json -v
+        tile_count=$(find "${{ inputs.tile_dir }}" -name "*.gph" | wc -l)
+        echo "built $tile_count tile(s)"
+        test -f "${{ inputs.tile_dir }}/tiles.tar"
+        echo "tile_extract=$(pwd)/${{ inputs.tile_dir }}/tiles.tar" >> "$GITHUB_OUTPUT"

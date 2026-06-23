@@ -1,0 +1,109 @@
+name: Routing Regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      valhalla_ref_old:
+        description: "Baseline Valhalla ref (the 'before')"
+        default: master
+        required: true
+      valhalla_ref_new:
+        description: "New Valhalla ref to test (the 'after' - branch, tag, or SHA)"
+        required: true
+
+# queue concurrent runs rather than cancel
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - label: old
+            ref: ${{ inputs.valhalla_ref_old }}
+          - label: new
+            ref: ${{ inputs.valhalla_ref_new }}
+
+    steps:
+      - name: Checkout RAD
+        uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - name: Checkout RAD-data
+        uses: actions/checkout@v6
+        with:
+          repository: valhalla/RAD-data
+          path: RAD-data
+
+      - name: Build Valhalla at ${{ matrix.label }} ref
+        uses: ./.github/actions/build-valhalla
+        with:
+          valhalla_ref: ${{ matrix.ref }}
+          python_version: "3.12"
+
+      - name: Build tiles for ${{ matrix.label }} ref
+        id: tiles
+        uses: ./.github/actions/build-tiles
+        with:
+          pbf_path: data/liechtenstein_graph.osm.pbf
+
+      - name: Run route requests
+        run: |
+          python3 scripts/run_routes.py \
+            --tile-extract "${{ steps.tiles.outputs.tile_extract }}" \
+            --requests RAD-data/requests/requests.jsonl \
+            --output /tmp/responses-${{ matrix.label }}.jsonl
+
+      # responses are only needed for the current run's diff-and-store job, 7 days is generous
+      - name: Upload responses artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: responses-${{ matrix.label }}
+          path: /tmp/responses-${{ matrix.label }}.jsonl
+          retention-days: 7
+
+  diff-and-store:
+    runs-on: ubuntu-latest
+    needs: regression
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout RAD
+        uses: actions/checkout@v6
+
+      - name: Checkout RAD-data
+        uses: actions/checkout@v6
+        with:
+          repository: valhalla/RAD-data
+          path: RAD-data
+
+      - name: Download responses
+        uses: actions/download-artifact@v4
+        with:
+          pattern: responses-*
+          path: /tmp/responses
+          merge-multiple: false
+
+      # Debug step
+      - name: List downloaded artifacts
+        run: find /tmp/responses -type f
+
+      - name: Compute diff and push to RAD-data
+        run: |
+          python3 scripts/diff_responses.py \
+            --old /tmp/responses/responses-old/responses-old.jsonl \
+            --new /tmp/responses/responses-new/responses-new.jsonl \
+            --old-ref "${{ inputs.valhalla_ref_old }}" \
+            --new-ref "${{ inputs.valhalla_ref_new }}" \
+            --output RAD-data/diffs/${{ github.run_id }}.json
+          cd RAD-data
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add diffs/${{ github.run_id }}.json
+          git commit -m "regression: ${{ inputs.valhalla_ref_old }} vs ${{ inputs.valhalla_ref_new }} (run ${{ github.run_id }})"
+          git push https://x-access-token:${{ secrets.RAD_DATA_TOKEN }}@github.com/valhalla/RAD-data.git
