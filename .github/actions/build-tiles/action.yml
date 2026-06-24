@@ -1,0 +1,26 @@
+name: Build Tiles
+description: >
+  Builds a routable Valhalla graph extract from a PBF, using the Valhalla
+  install already present on the runner. Outputs a single tile_extract tar.
+
+inputs:
+  pbf_path:
+    description: "Path to the OSM PBF to build the graph from"
+    required: true
+  tile_dir:
+    description: "Working directory to build raw tiles into before bundling"
+    required: false
+    default: "valhalla_tiles"
+
+outputs:
+  tile_extract:
+    description: "Absolute path to the built, uncompressed tile extract tar"
+    value: ${{ steps.extract.outputs.tile_extract }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build tiles and extract
+      id: extract
+      shell: bash
+      run: .github/workflows/scripts/build_extract.sh "${{ inputs.pbf_path }}" "${{ inputs.tile_dir }}"

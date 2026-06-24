@@ -1,0 +1,69 @@
+name: Build Valhalla
+description: >
+  Builds Valhalla from source as a Python wheel and installs it into the
+  current job's environment.
+
+inputs:
+  valhalla_ref:
+    description: "Valhalla git ref to build (branch, tag, or commit SHA)"
+    required: true
+  python_version:
+    description: "Python version to build and install the wheel against"
+    required: false
+    default: "3.12"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Sanitize ref for cache key
+      id: sanitize
+      shell: bash
+      run: echo "ref_slug=$(echo '${{ inputs.valhalla_ref }}' | tr '/' '-')" >> "$GITHUB_OUTPUT"
+
+    - name: Checkout Valhalla
+      uses: actions/checkout@v6
+      with:
+        repository: valhalla/valhalla
+        ref: ${{ inputs.valhalla_ref }}
+        submodules: recursive
+        path: valhalla-src
+
+    - name: Install system dependencies
+      shell: bash
+      run: bash valhalla-src/scripts/install-linux-deps.sh
+
+    - name: Restore ccache
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-valhalla-${{ steps.sanitize.outputs.ref_slug }}
+        restore-keys: |
+          ccache-valhalla-master
+
+    # pyproject.toml sets Release/ENABLE_PYTHON_BINDINGS/ENABLE_TESTS defaults
+    - name: Build wheel
+      shell: bash
+      run: |
+        cd valhalla-src
+        pip wheel . --wheel-dir /tmp/valhalla-dist \
+          -Cbuild-dir=/tmp/valhalla-build \
+          -Ccmake.define.ENABLE_SERVICES=OFF \
+          -Ccmake.define.ENABLE_CCACHE=ON \
+          -Ccmake.define.ENABLE_GEOTIFF=OFF \
+          -Ccmake.define.ENABLE_LZ4=OFF
+
+    - name: Save ccache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-valhalla-${{ steps.sanitize.outputs.ref_slug }}
+
+    - name: Install wheel
+      shell: bash
+      run: pip install /tmp/valhalla-dist/*.whl
