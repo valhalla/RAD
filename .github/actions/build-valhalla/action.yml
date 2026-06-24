@@ -52,9 +52,10 @@ runs:
         cd valhalla-src
         pip wheel . --wheel-dir /tmp/valhalla-dist \
           -Cbuild-dir=/tmp/valhalla-build \
-          -Ccmake.define.ENABLE_TOOLS=ON \
           -Ccmake.define.ENABLE_SERVICES=OFF \
-          -Ccmake.define.ENABLE_CCACHE=ON
+          -Ccmake.define.ENABLE_CCACHE=ON \
+          -Ccmake.define.ENABLE_GEOTIFF=OFF \
+          -Ccmake.define.ENABLE_LZ4=OFF
 
     - name: Save ccache
       if: always()

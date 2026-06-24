@@ -20,24 +20,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Build config, admins, and tiles
-      shell: bash
-      run: |
-        mkdir -p "${{ inputs.tile_dir }}"
-        valhalla_build_config \
-          --mjolnir-tile-dir "${{ inputs.tile_dir }}" \
-          --mjolnir-admin "${{ inputs.tile_dir }}/admins.sqlite" \
-          --mjolnir-tile-extract "${{ inputs.tile_dir }}/tiles.tar" \
-          > /tmp/valhalla-build.json
-        valhalla_build_admins -c /tmp/valhalla-build.json "${{ inputs.pbf_path }}"
-        valhalla_build_tiles -c /tmp/valhalla-build.json "${{ inputs.pbf_path }}"
-
-    - name: Bundle tiles into a single extract
+    - name: Build tiles and extract
       id: extract
       shell: bash
-      run: |
-        valhalla_build_extract -c /tmp/valhalla-build.json -v
-        tile_count=$(find "${{ inputs.tile_dir }}" -name "*.gph" | wc -l)
-        echo "built $tile_count tile(s)"
-        test -f "${{ inputs.tile_dir }}/tiles.tar"
-        echo "tile_extract=$(pwd)/${{ inputs.tile_dir }}/tiles.tar" >> "$GITHUB_OUTPUT"
+      run: .github/workflows/scripts/build_extract.sh "${{ inputs.pbf_path }}" "${{ inputs.tile_dir }}"

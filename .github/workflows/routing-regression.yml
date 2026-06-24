@@ -53,7 +53,8 @@ jobs:
 
       - name: Run route requests
         run: |
-          python3 scripts/run_routes.py \
+          # TODO: WIP , Move to scripts/ once done.
+          python3 debug/run_routes.py \
             --tile-extract "${{ steps.tiles.outputs.tile_extract }}" \
             --requests RAD-data/requests/requests.jsonl \
             --output /tmp/responses-${{ matrix.label }}.jsonl
@@ -95,7 +96,8 @@ jobs:
 
       - name: Compute diff and push to RAD-data
         run: |
-          python3 scripts/diff_responses.py \
+          # TODO: WIP , Move to scripts/ once done.
+          python3 debug/diff_responses.py \
             --old /tmp/responses/responses-old/responses-old.jsonl \
             --new /tmp/responses/responses-new/responses-new.jsonl \
             --old-ref "${{ inputs.valhalla_ref_old }}" \
